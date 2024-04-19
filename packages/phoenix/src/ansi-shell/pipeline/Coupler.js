@@ -16,7 +16,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-import { TeePromise } from "../../promise.js";
+import { TeePromise, raceCase } from "../../promise.js";
 
 export class Coupler {
     static description = `
@@ -42,7 +42,6 @@ export class Coupler {
 
     close () {
         if (this.debug) console.log('closing coupler. source is', this.source);
-        this.source.releaseLock();
         this.closed_.resolve({
             done: true,
         });
@@ -51,11 +50,21 @@ export class Coupler {
     async listenLoop_ () {
         this.active = true;
         for (;;) {
-            const { value, done } = await Promise.race([
-                this.closed_,
-                this.source.read(),
-            ]);
+            let canceller = () => {};
+            let promise;
+            if ( this.source.read_with_cancel !== undefined ) {
+                ({ canceller, promise } = this.source.read_with_cancel());
+            } else {
+                promise = this.source.read();
+            }
+            const [which, { value, done }] = await raceCase({
+                source: promise,
+                closed: this.closed_,
+            });
             if ( done ) {
+                if ( which === 'closed' ) {
+                    canceller();
+                }
                 this.source = null;
                 this.target = null;
                 this.active = false;

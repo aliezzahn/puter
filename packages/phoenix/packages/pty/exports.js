@@ -27,21 +27,56 @@ export class BetterReader {
         this.chunks_ = [];
     }
 
-    async read (opt_buffer) {
+    _create_cancel_response () {
+        return {
+            chunk: null,
+            n_read: 0,
+            debug_meta: {
+                source: 'delegate',
+                returning: 'cancelled',
+                this_value_should_not_be_used: true,
+            },
+        };
+    }
+
+    async read_and_get_info (opt_buffer, cancel_state) {
         if ( ! opt_buffer && this.chunks_.length === 0 ) {
-            return await this.delegate.read();
+            const chunk = await this.delegate.read();
+            if ( cancel_state?.cancelled ) {
+                // push the chunk back onto the queue
+                this.chunks_.push(chunk);
+                return this._create_cancel_response();
+            }
+            return {
+                chunk,
+                debug_meta: { source: 'delegate' },
+            };
         }
 
         const chunk = await this.getChunk_();
+        if ( cancel_state?.cancelled ) {
+            // push the chunk back onto the queue
+            this.chunks_.push(chunk);
+            return this._create_cancel_response();
+        }
 
-        if ( ! opt_buffer || ! chunk ) {
-            return chunk;
+        if ( ! opt_buffer ) {
+            return { chunk, debug_meta: { source: 'stored chunks', returning: 'chunk' } };
+        }
+
+        if ( ! chunk ) {
+            return { n_read: 0, debug_meta: { source: 'nothing', returning: 'byte count' } };
         }
 
         this.chunks_.push(chunk);
 
         while ( this.getTotalBytesReady_() < opt_buffer.length ) {
             const read_chunk = await this.getChunk_();
+            if ( cancel_state?.cancelled ) {
+                // push the chunk back onto the queue
+                this.chunks_.push(read_chunk);
+                return this._create_cancel_response();
+            }
             if ( ! read_chunk ) {
                 break;
             }
@@ -63,14 +98,37 @@ export class BetterReader {
             offset += item.length;
         }
 
-        return offset;
+        return {
+            n_read: offset,
+            debug_meta: { source: 'stored chunks', returning: 'byte count' },
+        };
+    }
+
+    read_with_cancel (opt_buffer) {
+        const cancel_state = { cancelled: false };
+        const promise = (async () => {
+            const { chunk, n_read } = await this.read_and_get_info(opt_buffer, cancel_state);
+            console.log('this is outputting...', chunk, n_read, opt_buffer);
+            return opt_buffer ? n_read : chunk;
+        })();
+        return {
+            canceller: () => {
+                cancel_state.cancelled = true;
+            },
+            promise,
+        };
+    }
+
+    async read (opt_buffer) {
+        const { chunk, n_read } = await this.read_and_get_info(opt_buffer);
+        console.log('this is outputting...', chunk, n_read, opt_buffer);
+        return opt_buffer ? n_read : chunk;
     }
 
     async getChunk_() {
         if ( this.chunks_.length === 0 ) {
-            const { value } = await this.delegate.read().catch( ( err ) => {
-                return {};
-            });
+            const { value } = await this.delegate.read();
+            console.log('got value?', value);
             return value;
         }
 
@@ -83,6 +141,8 @@ export class BetterReader {
         }
 
         this.chunks_ = [];
+
+        console.log('returning merged', merged);
 
         return merged;
     }
