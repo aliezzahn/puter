@@ -44,6 +44,8 @@
   "dependencies": {
     "json-colorizer": "^3.0.1",
     "string-template": "^1.0.0",
+    "tweetnacl": "^1.0.3",
+    "tweetnacl-util": "^0.15.1",
     "uuid": "^9.0.1"
   }
 }
