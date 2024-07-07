@@ -11,11 +11,34 @@ const BaseService = require("./BaseService");
  * initialize a context.
  */
 class MountpointService extends BaseService {
+    static default_mountpoints = [
+        {
+            mapping: '/',
+            engine: 'puter',
+        },
+        {
+            mapping: '/x/mnt/local',
+            engine: 'local',
+            parameters: {
+                auto_mkdir: true,
+                path: '{runtime}/local',
+                uid_strategy: 'uuidv4',
+            }
+        }
+    ]
+    
     async _init () {
         // this.mountpoints_ = {};
         
         // Temporary solution - we'll develop this incrementally
         this.storage_ = null;
+        this.mounts_ = {};
+        
+        const mountpoints = [
+            ...this.constructor.default_mountpoints,
+            ...(this.config.mountpoints ?? [])
+        ];
+        //
     }
     
     // Temporary solution - we'll develop this incrementally
